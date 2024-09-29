@@ -7,13 +7,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <THC/THC.h>
-#include <THC/THCDeviceUtils.cuh>
-
 #include <vector>
 #include <iostream>
 #include <cmath>
-
 
 void deformable_im2col(const at::Tensor data_im, const at::Tensor data_offset,
                        const int channels, const int height, const int width,
@@ -43,7 +39,7 @@ void modulated_deformable_im2col_cuda(
     const at::Tensor data_im, const at::Tensor data_offset,
     const at::Tensor data_mask, const int batch_size, const int channels,
     const int height_im, const int width_im, const int height_col,
-    const int width_col, const int kernel_h, const int kenerl_w,
+    const int width_col, const int kernel_h, const int kernel_w,
     const int pad_h, const int pad_w, const int stride_h, const int stride_w,
     const int dilation_h, const int dilation_w, const int deformable_group,
     at::Tensor data_col);
@@ -52,7 +48,7 @@ void modulated_deformable_col2im_cuda(
     const at::Tensor data_col, const at::Tensor data_offset,
     const at::Tensor data_mask, const int batch_size, const int channels,
     const int height_im, const int width_im, const int height_col,
-    const int width_col, const int kernel_h, const int kenerl_w,
+    const int width_col, const int kernel_h, const int kernel_w,
     const int pad_h, const int pad_w, const int stride_h, const int stride_w,
     const int dilation_h, const int dilation_w, const int deformable_group,
     at::Tensor grad_im);
@@ -62,7 +58,7 @@ void modulated_deformable_col2im_coord_cuda(
     const at::Tensor data_offset, const at::Tensor data_mask,
     const int batch_size, const int channels, const int height_im,
     const int width_im, const int height_col, const int width_col,
-    const int kernel_h, const int kenerl_w, const int pad_h, const int pad_w,
+    const int kernel_h, const int kernel_w, const int pad_h, const int pad_w,
     const int stride_h, const int stride_w, const int dilation_h,
     const int dilation_w, const int deformable_group, at::Tensor grad_offset,
     at::Tensor grad_mask);
@@ -165,13 +161,7 @@ int deform_conv_forward_cuda(at::Tensor input, at::Tensor weight,
                              int dilationW, int dilationH, int group,
                              int deformable_group, int im2col_step) 
 {
-  // todo: resize columns to include im2col: done
-  // todo: add im2col_step as input
-  // todo: add new output buffer and transpose it to output (or directly
-  // transpose output) todo: possibly change data indexing because of
-  // parallel_imgs
-
-  shape_check(input, offset, NULL, weight, kH, kW, dH, dW, padH, padW,
+  shape_check(input, offset, nullptr, weight, kH, kW, dH, dW, padH, padW,
               dilationH, dilationW, group, deformable_group);
 
   input = input.contiguous();
@@ -186,13 +176,10 @@ int deform_conv_forward_cuda(at::Tensor input, at::Tensor weight,
     offset.unsqueeze_(0);
   }
 
-  // todo: assert batchsize dividable by im2col_step
-
   long batchSize = input.size(0);
   long nInputPlane = input.size(1);
   long inputHeight = input.size(2);
   long inputWidth = input.size(3);
-
   long nOutputPlane = weight.size(0);
 
   long outputWidth =
@@ -267,7 +254,6 @@ int deform_conv_forward_cuda(at::Tensor input, at::Tensor weight,
 
   return 1;
 }
-
 int deform_conv_backward_input_cuda(at::Tensor input, at::Tensor offset,
                                     at::Tensor gradOutput, at::Tensor gradInput,
                                     at::Tensor gradOffset, at::Tensor weight,
@@ -299,7 +285,6 @@ int deform_conv_backward_input_cuda(at::Tensor input, at::Tensor offset,
   long nInputPlane = input.size(1);
   long inputHeight = input.size(2);
   long inputWidth = input.size(3);
-
   long nOutputPlane = weight.size(0);
 
   long outputWidth =
@@ -313,7 +298,7 @@ int deform_conv_backward_input_cuda(at::Tensor input, at::Tensor offset,
       {nInputPlane * kW * kH, im2col_step * outputHeight * outputWidth},
       input.options());
 
-  // change order of grad output
+  // Change order of grad output
   gradOutput = gradOutput.view({batchSize / im2col_step, im2col_step,
                                 nOutputPlane, outputHeight, outputWidth});
   gradOutput.transpose_(1, 2);
@@ -330,7 +315,7 @@ int deform_conv_backward_input_cuda(at::Tensor input, at::Tensor offset,
                    deformable_group * 2 * kH * kW, outputHeight, outputWidth});
 
   for (int elt = 0; elt < batchSize / im2col_step; elt++) {
-    // divide into groups
+    // Divide into groups
     columns = columns.view({group, columns.size(0) / group, columns.size(1)});
     weight = weight.view({group, weight.size(0) / group, weight.size(1),
                           weight.size(2), weight.size(3)});
@@ -381,7 +366,6 @@ int deform_conv_backward_input_cuda(at::Tensor input, at::Tensor offset,
 
   return 1;
 }
-
 int deform_conv_backward_parameters_cuda(
     at::Tensor input, at::Tensor offset, at::Tensor gradOutput,
     at::Tensor gradWeight,  // at::Tensor gradBias,
@@ -457,7 +441,7 @@ int deform_conv_backward_parameters_cuda(
                       inputWidth, kH, kW, padH, padW, dH, dW, dilationH,
                       dilationW, im2col_step, deformable_group, columns);
 
-    // divide into group
+    // Divide into groups
     gradOutputBuffer = gradOutputBuffer.view(
         {gradOutputBuffer.size(0), group, gradOutputBuffer.size(1) / group,
          gradOutputBuffer.size(2), gradOutputBuffer.size(3)});
@@ -495,7 +479,6 @@ int deform_conv_backward_parameters_cuda(
 
   return 1;
 }
-
 void modulated_deform_conv_cuda_forward(
     at::Tensor input, at::Tensor weight, at::Tensor bias, at::Tensor ones,
     at::Tensor offset, at::Tensor mask, at::Tensor output, at::Tensor columns,
@@ -518,10 +501,10 @@ void modulated_deform_conv_cuda_forward(
   const int kernel_w_ = weight.size(3);
 
   if (kernel_h_ != kernel_h || kernel_w_ != kernel_w)
-    AT_ERROR("Input shape and kernel shape wont match: (%d x %d vs %d x %d).",
+    AT_ERROR("Input shape and kernel shape won't match: (%d x %d vs %d x %d).",
              kernel_h_, kernel_w, kernel_h_, kernel_w_);
   if (channels != channels_kernel * group)
-    AT_ERROR("Input shape and kernel channels wont match: (%d vs %d).",
+    AT_ERROR("Input shape and kernel channels won't match: (%d vs %d).",
              channels, channels_kernel * group);
 
   const int height_out =
@@ -535,9 +518,9 @@ void modulated_deform_conv_cuda_forward(
     ones = at::ones({height_out, width_out}, input.options());
   }
 
-  // resize output
+  // Resize output
   output = output.view({batch, channels_out, height_out, width_out}).zero_();
-  // resize temporary columns
+  // Resize temporary columns
   columns =
       at::zeros({channels * kernel_h * kernel_w, 1 * height_out * width_out},
                 input.options());
@@ -551,7 +534,7 @@ void modulated_deform_conv_cuda_forward(
         width_out, kernel_h, kernel_w, pad_h, pad_w, stride_h, stride_w,
         dilation_h, dilation_w, deformable_group, columns);
 
-    // divide into group
+    // Divide into group
     weight = weight.view({group, weight.size(0) / group, weight.size(1),
                           weight.size(2), weight.size(3)});
     columns = columns.view({group, columns.size(0) / group, columns.size(1)});
@@ -576,7 +559,6 @@ void modulated_deform_conv_cuda_forward(
     output += bias.view({1, bias.size(0), 1, 1});
   }
 }
-
 void modulated_deform_conv_cuda_backward(
     at::Tensor input, at::Tensor weight, at::Tensor bias, at::Tensor ones,
     at::Tensor offset, at::Tensor mask, at::Tensor columns,
@@ -597,11 +579,12 @@ void modulated_deform_conv_cuda_backward(
   const int channels_kernel = weight.size(1);
   const int kernel_h_ = weight.size(2);
   const int kernel_w_ = weight.size(3);
+  
   if (kernel_h_ != kernel_h || kernel_w_ != kernel_w)
-    AT_ERROR("Input shape and kernel shape wont match: (%d x %d vs %d x %d).",
+    AT_ERROR("Input shape and kernel shape won't match: (%d x %d vs %d x %d).",
              kernel_h_, kernel_w, kernel_h_, kernel_w_);
   if (channels != channels_kernel * group)
-    AT_ERROR("Input shape and kernel channels wont match: (%d vs %d).",
+    AT_ERROR("Input shape and kernel channels won't match: (%d vs %d).",
              channels, channels_kernel * group);
 
   const int height_out =
@@ -624,7 +607,7 @@ void modulated_deform_conv_cuda_backward(
                         grad_output.size(2), grad_output.size(3)});
 
   for (int b = 0; b < batch; b++) {
-    // divide int group
+    // Divide into group
     columns = columns.view({group, columns.size(0) / group, columns.size(1)});
     weight = weight.view({group, weight.size(0) / group, weight.size(1),
                           weight.size(2), weight.size(3)});
@@ -639,20 +622,20 @@ void modulated_deform_conv_cuda_backward(
     weight = weight.view({weight.size(0) * weight.size(1), weight.size(2),
                           weight.size(3), weight.size(4)});
 
-    // gradient w.r.t. input coordinate data
+    // Gradient w.r.t. input coordinate data
     modulated_deformable_col2im_coord_cuda(
         columns, input[b], offset[b], mask[b], 1, channels, height, width,
         height_out, width_out, kernel_h, kernel_w, pad_h, pad_w, stride_h,
         stride_w, dilation_h, dilation_w, deformable_group, grad_offset[b],
         grad_mask[b]);
-    // gradient w.r.t. input data
+
+    // Gradient w.r.t. input data
     modulated_deformable_col2im_cuda(
         columns, offset[b], mask[b], 1, channels, height, width, height_out,
         width_out, kernel_h, kernel_w, pad_h, pad_w, stride_h, stride_w,
         dilation_h, dilation_w, deformable_group, grad_input[b]);
 
-    // gradient w.r.t. weight, dWeight should accumulate across the batch and
-    // group
+    // Gradient w.r.t. weight, grad_weight should accumulate across the batch and group
     modulated_deformable_im2col_cuda(
         input[b], offset[b], mask[b], 1, channels, height, width, height_out,
         width_out, kernel_h, kernel_w, pad_h, pad_w, stride_h, stride_w,
@@ -662,6 +645,7 @@ void modulated_deform_conv_cuda_backward(
     grad_weight = grad_weight.view({group, grad_weight.size(0) / group,
                                     grad_weight.size(1), grad_weight.size(2),
                                     grad_weight.size(3)});
+
     if (with_bias)
       grad_bias = grad_bias.view({group, grad_bias.size(0) / group});
 
@@ -688,6 +672,7 @@ void modulated_deform_conv_cuda_backward(
     if (with_bias)
       grad_bias = grad_bias.view({grad_bias.size(0) * grad_bias.size(1)});
   }
+
   grad_output = grad_output.view({grad_output.size(0) * grad_output.size(1),
                                   grad_output.size(2), grad_output.size(3),
                                   grad_output.size(4)});

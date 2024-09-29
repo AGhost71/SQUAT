@@ -11,13 +11,9 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 
-#include <THC/THC.h>
-#include <THC/THCDeviceUtils.cuh>
-
 #include <vector>
 #include <iostream>
 #include <cmath>
-
 
 void DeformablePSROIPoolForward(
     const at::Tensor data, const at::Tensor bbox, const at::Tensor trans,
@@ -52,7 +48,7 @@ void deform_psroi_pooling_cuda_forward(
 
   const int num_bbox = bbox.size(0);
   if (num_bbox != out.size(0))
-    AT_ERROR("Output shape and bbox number wont match: (%d vs %d).",
+    AT_ERROR("Output shape and bbox number won't match: (%d vs %d).",
              out.size(0), num_bbox);
 
   DeformablePSROIPoolForward(
@@ -79,7 +75,7 @@ void deform_psroi_pooling_cuda_backward(
 
   const int num_bbox = bbox.size(0);
   if (num_bbox != out_grad.size(0))
-    AT_ERROR("Output shape and bbox number wont match: (%d vs %d).",
+    AT_ERROR("Output shape and bbox number won't match: (%d vs %d).",
              out_grad.size(0), num_bbox);
 
   DeformablePSROIPoolBackwardAcc(
