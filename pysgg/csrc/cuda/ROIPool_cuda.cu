@@ -1,7 +1,7 @@
 // Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved.
-include <ATen/ATen.h>
+#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
-#include <ATen/native/cuda/Atomics.cuh>
+#include <ATen/cuda/Atomics.cuh>
 #include <ATen/native/cuda/KernelUtils.h>
 
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
