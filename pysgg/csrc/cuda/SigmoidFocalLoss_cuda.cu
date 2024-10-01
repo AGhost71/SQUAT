@@ -5,7 +5,7 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <cfloat>
-inline int ceilDiv(long a, long b) {
+inline int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
 }
 // CUDA kernel loop definition
