@@ -5,11 +5,14 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <cfloat>
-
+inline int ceilDiv(long a, long b) {
+  return (a + b - 1) / b;
+}
 // CUDA kernel loop definition
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; \
        i += blockDim.x * gridDim.x)
+
 
 template <typename T>
 __global__ void SigmoidFocalLossForward(const int nthreads, 
@@ -96,7 +99,7 @@ at::Tensor SigmoidFocalLoss_forward_cuda(
   const int losses_size = num_samples * logits.size(1);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  dim3 grid(std::min(at::cuda::ceilDiv(losses_size, 512L), 4096L));
+  dim3 grid(std::min(ceilDiv(losses_size, 512L), 4096L));
   dim3 block(512);
 
   if (losses.numel() == 0) {
@@ -137,7 +140,7 @@ at::Tensor SigmoidFocalLoss_backward_cuda(
   const int d_logits_size = num_samples * logits.size(1);
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  dim3 grid(std::min(at::cuda::ceilDiv(d_logits_size, 512L), 4096L));
+  dim3 grid(std::min(ceilDiv(d_logits_size, 512L), 4096L));
   dim3 block(512);
 
   if (d_logits.numel() == 0) {
