@@ -2,8 +2,11 @@
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/Atomic.cuh>
-#include <ATen/native/cuda/KernelUtils.h>
+#include <ATen/native/cuda/KernelUtils.cuh>
 
+inline int ceilDiv(int a, int b) {
+  return (a + b - 1) / b;
+}
 #define CUDA_1D_KERNEL_LOOP(i, n)                            \
   for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < n; \
        i += blockDim.x * gridDim.x)
@@ -108,7 +111,7 @@ std::tuple<at::Tensor, at::Tensor> ROIPool_forward_cuda(const at::Tensor& input,
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   int output_size = num_rois * pooled_height * pooled_width * channels;
-  dim3 grid(std::min(at::cuda::ceilDiv(output_size, 512L), 4096L));
+  dim3 grid(std::min(static_cast<long>(ceilDiv(output_size, 512L)), 4096L));
   dim3 block(512);
 
   if (output.numel() == 0) {
@@ -152,7 +155,7 @@ at::Tensor ROIPool_backward_cuda(const at::Tensor& grad,
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
-  dim3 grid(std::min(at::cuda::ceilDiv(grad.numel(), 512L), 4096L));
+  dim3 grid(std::min(static_cast<long>(ceilDiv(grad.numel(), 512L)), 4096L));
   dim3 block(512);
 
   if (grad.numel() == 0) {

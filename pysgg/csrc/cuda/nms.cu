@@ -3,6 +3,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <vector>
 #include <iostream>
+#include <c10/cuda/CUDACachingAllocator.h>
 
 int const threadsPerBlock = sizeof(unsigned long long) * 8;
 
