@@ -256,11 +256,11 @@ class TransformerPredictor(nn.Module):
         """
         if self.attribute_on:
             obj_dists, obj_preds, att_dists, edge_ctx = self.context_layer(
-                roi_features, proposals, logger
+                roi_features, proposals, union_features, rel_pair_idxs, logger
             )
         else:
             obj_dists, obj_preds, edge_ctx = self.context_layer(
-                roi_features, proposals, logger
+                roi_features, proposals, union_features, rel_pair_idxs, logger
             )
 
         # post decode
