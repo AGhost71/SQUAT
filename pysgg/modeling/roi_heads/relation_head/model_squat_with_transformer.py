@@ -152,8 +152,22 @@ class P2PDecoderLayer(nn.Module):
         updated_unary = self.norm3(updated_unary + self._ff_block_node(updated_unary))
         for key in attn_weights:
             attn_weights[key] = F.softmax(attn_weights[key], dim=-1)
+            attn_weights[key] = pad_tensor_to_square(attn_weights[key],694)
         
         return updated_unary, updated_pair,attn_weights
+    def pad_tensor_to_square(self,tensor, target_size):
+        """
+        Pads a tensor to make it square with the specified target size.
+        Args:
+            tensor: Input tensor of shape [batch_size, seq_len_1, seq_len_2].
+            target_size: Desired sequence length for both dimensions.
+        Returns:
+            Padded tensor of shape [batch_size, target_size, target_size].
+        """
+        seq_len_1, seq_len_2 = tensor.size(1), tensor.size(2)
+        pad_left = target_size - seq_len_2
+        pad_top = target_size - seq_len_1
+        return F.pad(tensor, (0, pad_left, 0, pad_top), value=0)
 
     def _sa_block(self, x, attn_mask, key_padding_mask): 
         x = self.self_attn(x, x, x, attn_mask=attn_mask, 
@@ -280,7 +294,6 @@ class SquatContext(nn.Module):
         num_rels = [rel_pair_idx.size(0) for rel_pair_idx in rel_pair_idxs]
         rel_inds, obj_obj_map, obj_num = self._get_map_idx(proposals, rel_pair_idxs)
         
-        # Embed object and relationship features
         feat_obj = self.obj_embedding(roi_features)
         augment_obj_feat, feat_pred = self.pairwise_feature_extractor(
             roi_features,
@@ -289,16 +302,22 @@ class SquatContext(nn.Module):
             rel_pair_idxs,
         )
         
-        # Get mask-based selection indices
         feat_pred_batch_key = torch.split(feat_pred, num_rels)
-        masks = [self.mask_predictor(k).squeeze(1) for k in feat_pred_batch_key]
+        masks = [self.mask_predictor(k).squeeze(1) for k in feat_pred_batch_key] # num_rel X 1 
         top_inds = [torch.topk(mask, int(mask.size(0) * self.rho))[1] for mask in masks]
+        feat_pred_batch_query = [k[top_ind] for k, top_ind in zip(feat_pred_batch_key, top_inds)]
         
-        # Perform quad attention updates
-        feat_pred_batch = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)).squeeze(1)
-                           for p, u, q, ind, ind_e2e, ind_n2e in
-                           zip(feat_pred_batch_key, augment_obj_feat, feat_pred_batch_key, top_inds, top_inds, top_inds)]
+        masks_e2e = [self.mask_predictor_e2e(k).squeeze(1) for k in feat_pred_batch_key]
+        top_inds_e2e = [torch.topk(mask, int(mask.size(0) * self.beta))[1] for mask in masks_e2e]
         
+        masks_n2e = [self.mask_predictor_n2e(k).squeeze(1) for k in feat_pred_batch_key]
+        top_inds_n2e = [torch.topk(mask, int(mask.size(0) * self.beta))[1] for mask in masks_n2e]
+        
+        augment_obj_feat = torch.split(augment_obj_feat, [len(proposal) for proposal in proposals])
+        
+        feat_pred_batch = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)).squeeze(1) \
+                           for p, u, q, ind, ind_e2e, ind_n2e in \
+                           zip(feat_pred_batch_key, augment_obj_feat, feat_pred_batch_query, top_inds, top_inds_e2e, top_inds_n2e)]
         # Concatenate object and relationship features in sequence format for Transformer
         combined_features = torch.cat([feat_obj] + feat_pred_batch, dim=0)
         
