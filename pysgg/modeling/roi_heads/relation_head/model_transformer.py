@@ -1,6 +1,3 @@
-"""
-Based on the implementation of https://github.com/jadore801120/attention-is-all-you-need-pytorch
-"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,7 +5,6 @@ import numpy as np
 from pysgg.modeling.utils import cat
 from .utils_motifs import obj_edge_vectors, to_onehot, encode_box_info
 from .utils_relation import nms_overlaps
-from .model_squat_with_transformer import SquatContext
 
 
 class ScaledDotProductAttention(nn.Module):
@@ -19,7 +15,7 @@ class ScaledDotProductAttention(nn.Module):
         self.dropout = nn.Dropout(attn_dropout)
         self.softmax = nn.Softmax(dim=2)
 
-    def forward(self, q, k, v, mask=None, attn_weights=None):
+    def forward(self, q, k, v, mask=None):
         """
         Args:
             q (bsz, len_q, dim_q)
@@ -36,8 +32,6 @@ class ScaledDotProductAttention(nn.Module):
         if mask is not None:
             attn = attn.masked_fill(mask, -np.inf)
 
-        if attn_weights is not None:
-            attn = attn * attn_weights
         attn = self.softmax(attn)
         attn = self.dropout(attn)
         output = torch.bmm(attn, v)
@@ -69,7 +63,7 @@ class MultiHeadAttention(nn.Module):
         self.dropout = nn.Dropout(dropout)
 
 
-    def forward(self, q, k, v, mask=None, attn_weights=None):
+    def forward(self, q, k, v, mask=None):
         """
         Args:
             q (bsz, len_q, dim_q)
@@ -97,7 +91,7 @@ class MultiHeadAttention(nn.Module):
         v = v.permute(2, 0, 1, 3).contiguous().view(-1, len_v, d_v) # (n*b) x lv x dv
 
         mask = mask.repeat(n_head, 1, 1) # (n*b) x .. x ..
-        output, attn = self.attention(q, k, v, mask=mask,attn_weights=attn_weights)
+        output, attn = self.attention(q, k, v, mask=mask)
 
         output = output.view(n_head, sz_b, len_q, d_v)
         output = output.permute(1, 2, 0, 3).contiguous().view(sz_b, len_q, -1) # b x lq x (n*dv)
@@ -142,9 +136,9 @@ class EncoderLayer(nn.Module):
             n_head, d_model, d_k, d_v, dropout=dropout)
         self.pos_ffn = PositionwiseFeedForward(d_model, d_inner, dropout=dropout)
 
-    def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None, attn_weights=None):
+    def forward(self, enc_input, non_pad_mask=None, slf_attn_mask=None):
         enc_output, enc_slf_attn = self.slf_attn(
-            enc_input, enc_input, enc_input, mask=slf_attn_mask,attn_weights=attn_weights)
+            enc_input, enc_input, enc_input, mask=slf_attn_mask)
         enc_output *= non_pad_mask.float()
 
         enc_output = self.pos_ffn(enc_output)
@@ -163,7 +157,7 @@ class TransformerEncoder(nn.Module):
             EncoderLayer(d_model, d_inner, n_head, d_k, d_v, dropout=dropout)
             for _ in range(n_layers)])
 
-    def forward(self, input_feats, num_objs,attn_weights=None):
+    def forward(self, input_feats, num_objs):
         """
         Args:
             input_feats [Tensor] (#total_box, d_model) : bounding box features of a batch
@@ -189,8 +183,7 @@ class TransformerEncoder(nn.Module):
             enc_output, enc_slf_attn = enc_layer(
                 enc_output,
                 non_pad_mask=non_pad_mask,
-                slf_attn_mask=slf_attn_mask,
-                attn_weights=attn_weights)
+                slf_attn_mask=slf_attn_mask)
 
         enc_output = enc_output[non_pad_mask.squeeze(-1)]
         return enc_output
@@ -237,7 +230,6 @@ class TransformerContext(nn.Module):
             nn.Linear(9, 32), nn.ReLU(inplace=True), nn.Dropout(0.1),
             nn.Linear(32, 128), nn.ReLU(inplace=True), nn.Dropout(0.1),
         ])
-        self.squat_context = SquatContext(config, in_channels)
         self.lin_obj = nn.Linear(self.in_channels + self.embed_dim + 128, self.hidden_dim)
         self.lin_edge = nn.Linear(self.embed_dim + self.hidden_dim + self.in_channels, self.hidden_dim)
         self.out_obj = nn.Linear(self.hidden_dim, self.num_obj_cls)
@@ -247,12 +239,11 @@ class TransformerContext(nn.Module):
                                                 self.v_dim, self.hidden_dim, self.inner_dim, self.dropout_rate)
 
     
-    def forward(self, roi_features, proposals, union_features, rel_pair_idxs, logger=None):
+    def forward(self, roi_features, proposals, logger=None):
         # labels will be used in DecoderRNN during training
         use_gt_label = self.training or self.cfg.MODEL.ROI_RELATION_HEAD.USE_GT_OBJECT_LABEL
         obj_labels = cat([proposal.get_field("labels") for proposal in proposals], dim=0) if use_gt_label else None
-        
-        combined_features, attn_weights = self.squat_context(roi_features, proposals, union_features, rel_pair_idxs)
+
         # label/logits embedding will be used as input
         if self.cfg.MODEL.ROI_RELATION_HEAD.USE_GT_OBJECT_LABEL:
             obj_embed = self.obj_embed1(obj_labels)
@@ -265,10 +256,10 @@ class TransformerContext(nn.Module):
         pos_embed = self.bbox_embed(encode_box_info(proposals))
 
         # encode objects with transformer
-        obj_pre_rep = cat((combined_features, obj_embed, pos_embed), -1)
+        obj_pre_rep = cat((roi_features, obj_embed, pos_embed), -1)
         num_objs = [len(p) for p in proposals]
         obj_pre_rep = self.lin_obj(obj_pre_rep)
-        obj_feats = self.context_obj(obj_pre_rep, num_objs, attn_weights=attn_weights)
+        obj_feats = self.context_obj(obj_pre_rep, num_objs)
 
         # predict obj_dists and obj_preds
         if self.mode == 'predcls':
@@ -287,7 +278,7 @@ class TransformerContext(nn.Module):
 
         # edge context
         edge_pre_rep = self.lin_edge(edge_pre_rep)
-        edge_ctx = self.context_edge(edge_pre_rep, num_objs, attn_weights=attn_weights)
+        edge_ctx = self.context_edge(edge_pre_rep, num_objs)
 
         return obj_dists, obj_preds, edge_ctx
 

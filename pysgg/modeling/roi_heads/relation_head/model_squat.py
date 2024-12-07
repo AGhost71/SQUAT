@@ -8,6 +8,7 @@ from pysgg.modeling.roi_heads.relation_head.model_msg_passing import (
     PairwiseFeatureExtractor,
 )
 import copy
+from pysgg.modeling.roi_heads.relation_head.model_transformer import TransformerEncoder
 
 def set_diff(a, b):
     combined = torch.cat((a, b))
@@ -236,6 +237,21 @@ class SquatContext(nn.Module):
         self.mask_predictor_n2e = MaskPredictor(self.pooling_dim, self.hidden_dim) 
         self.rho = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.RHO
         self.beta = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.BETA
+        self.hidden_dim = self.cfg.MODEL.ROI_RELATION_HEAD.CONTEXT_HIDDEN_DIM
+        self.nms_thresh = self.cfg.TEST.RELATION.LATER_NMS_PREDICTION_THRES
+
+        self.dropout_rate = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.DROPOUT_RATE   
+        self.obj_layer = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.OBJ_LAYER      
+        self.edge_layer = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.REL_LAYER        
+        self.num_head = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.NUM_HEAD         
+        self.inner_dim = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.INNER_DIM     
+        self.k_dim = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.KEY_DIM         
+        self.v_dim = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.VAL_DIM
+
+        self.context_obj = TransformerEncoder(self.obj_layer, self.num_head, self.k_dim, 
+                                                self.v_dim, self.hidden_dim, self.inner_dim, self.dropout_rate)
+        self.context_edge = TransformerEncoder(self.edge_layer, self.num_head, self.k_dim, 
+                                                self.v_dim, self.hidden_dim, self.inner_dim, self.dropout_rate)
 
     def set_pretrain_pre_clser_mode(self, val=True):
         self.pretrain_pre_clser_mode = val
@@ -261,6 +277,7 @@ class SquatContext(nn.Module):
 
     def forward(self, roi_features, proposals, union_features, rel_pair_idxs, rel_gt_binarys=None, logger=None):
         num_rels = [rel_pair_idx.size(0) for rel_pair_idx in rel_pair_idxs]
+        num_objs = [len(p) for p in proposals]
         rel_inds, obj_obj_map, obj_num = self._get_map_idx(proposals, rel_pair_idxs)
         
         feat_obj = self.obj_embedding(roi_features)
@@ -300,8 +317,9 @@ class SquatContext(nn.Module):
             feat_pred_batch_.append(feat_pred_)
 
         feat_pred_ = torch.cat(feat_pred_batch_, dim=0)
-        
-        score_obj = self.obj_classifier(feat_obj)        
+        feat_obj = self.context_obj(feat_obj,num_objs)
+        score_obj = self.obj_classifier(feat_obj)
+        feat_pred_= self.context_edge(feat_pred_,num_objs)
         score_pred = self.rel_classifier(feat_pred_)
         
         return score_obj, score_pred, (masks, masks_e2e, masks_n2e)
