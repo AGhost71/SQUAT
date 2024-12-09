@@ -10,6 +10,45 @@ from pysgg.modeling.roi_heads.relation_head.model_msg_passing import (
 import copy
 from pysgg.modeling.roi_heads.relation_head.model_transformer import TransformerEncoder
 
+class ObjectTransformerEncoder(nn.Module):
+    def __init__(self, obj_dim, num_heads=8, num_layers=2,dropout=1):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [nn.TransformerEncoderLayer(d_model=obj_dim, nhead=num_heads,dropout=dropout) for _ in range(num_layers)]
+        )
+
+    def forward(self, obj_feats, mask=None):
+        """
+        Args:
+            obj_feats: Object features [num_objects, obj_dim].
+            mask: Optional mask [num_objects, num_objects].
+        Returns:
+            Refined object features [num_objects, obj_dim].
+        """
+        for layer in self.layers:
+            obj_feats = layer(obj_feats, src_key_padding_mask=mask)
+        return obj_feats
+
+
+class RelationTransformerEncoder(nn.Module):
+    def __init__(self, rel_dim, num_heads=8, num_layers=2,dropout=1):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [nn.TransformerEncoderLayer(d_model=rel_dim, nhead=num_heads,dropout=dropout) for _ in range(num_layers)]
+        )
+
+    def forward(self, rel_feats, mask=None):
+        """
+        Args:
+            rel_feats: Relation features [num_relations, rel_dim].
+            mask: Optional mask [num_relations, num_relations].
+        Returns:
+            Refined relation features [num_relations, rel_dim].
+        """
+        for layer in self.layers:
+            rel_feats = layer(rel_feats, src_key_padding_mask=mask)
+        return rel_feats
+
 def set_diff(a, b):
     combined = torch.cat((a, b))
     uniques, counts = combined.unique(return_counts=True)
@@ -229,8 +268,8 @@ class SquatContext(nn.Module):
         decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first)
         num_layer = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.NUM_DECODER
         self.m2m_decoder = P2PDecoder(decoder_layer, num_layer)
-        self.obj_classifier = nn.Linear(self.hidden_dim, self.num_obj_cls)
-        self.rel_classifier = nn.Linear(self.pooling_dim, self.num_rel_cls)
+        self.obj_classifier = nn.Linear(2048, self.num_obj_cls)
+        self.rel_classifier = nn.Linear(2048, self.num_rel_cls)
         
         self.mask_predictor = MaskPredictor(self.pooling_dim, self.hidden_dim)
         self.mask_predictor_e2e = MaskPredictor(self.pooling_dim, self.hidden_dim)
@@ -240,18 +279,11 @@ class SquatContext(nn.Module):
         self.hidden_dim = self.cfg.MODEL.ROI_RELATION_HEAD.CONTEXT_HIDDEN_DIM
         self.nms_thresh = self.cfg.TEST.RELATION.LATER_NMS_PREDICTION_THRES
 
-        self.dropout_rate = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.DROPOUT_RATE   
-        self.obj_layer = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.OBJ_LAYER      
-        self.edge_layer = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.REL_LAYER        
-        self.num_head = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.NUM_HEAD         
-        self.inner_dim = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.INNER_DIM     
-        self.k_dim = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.KEY_DIM         
-        self.v_dim = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.VAL_DIM
+        self.dropout_rate = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.DROPOUT_RATE        
+        self.num_head = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.NUM_HEAD
+        self.object_encoder = ObjectTransformerEncoder(self.hidden_dim, self.num_head,dropout=self.dropout_rate)
+        self.relation_encoder = RelationTransformerEncoder(self.pooling_dim, self.num_head,dropout=self.dropout_rate)         
 
-        self.context_obj = TransformerEncoder(self.obj_layer, self.num_head, self.k_dim, 
-                                                self.v_dim, self.hidden_dim, self.inner_dim, self.dropout_rate)
-        self.context_edge = TransformerEncoder(self.edge_layer, self.num_head, self.k_dim, 
-                                                self.v_dim, self.hidden_dim, self.inner_dim, self.dropout_rate)
 
     def set_pretrain_pre_clser_mode(self, val=True):
         self.pretrain_pre_clser_mode = val
@@ -317,9 +349,9 @@ class SquatContext(nn.Module):
             feat_pred_batch_.append(feat_pred_)
 
         feat_pred_ = torch.cat(feat_pred_batch_, dim=0)
-        feat_obj = self.context_obj(feat_obj,num_objs)
+        feat_obj = self.object_encoder(feat_obj)
+        feat_pred_ = self.relation_encoder(feat_pred_)
         score_obj = self.obj_classifier(feat_obj)
-        feat_pred_= self.context_edge(feat_pred_,num_objs)
         score_pred = self.rel_classifier(feat_pred_)
         
         return score_obj, score_pred, (masks, masks_e2e, masks_n2e)
