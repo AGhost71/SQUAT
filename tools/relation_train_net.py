@@ -378,154 +378,157 @@ def train(
     model.train()
 
     print_first_grad = True
-    for iteration, (images, targets, _) in enumerate(train_data_loader, start_iter):
-        if any(len(target) < 1 for target in targets):
-            logger.error(
-                f"Iteration={iteration + 1} || Image Ids used for training {_} || targets Length={[len(target) for target in targets]}"
-            )
-        data_time = time.time() - end
-        iteration = iteration + 1
-        arguments["iteration"] = iteration
-
-        model.train()
-        fix_eval_modules(eval_modules)
-
-        images = images.to(device)
-        targets = [target.to(device) for target in targets]
-
-        loss_dict = model(images, targets, logger=logger)
-
-        losses = sum(loss for loss in loss_dict.values())
-
-        # reduce losses over all GPUs for logging purposes
-        loss_dict_reduced = reduce_loss_dict(loss_dict)
-        losses_reduced = sum(loss for loss in loss_dict_reduced.values())
-
-        meters.update(loss=losses_reduced, **loss_dict_reduced)
-        optimizer.zero_grad()
-        # Note: If mixed precision is not used, this ends up doing nothing
-        # Otherwise apply loss scaling for mixed-precision recipe
-        # try:
-        with amp.scale_loss(losses, optimizer) as scaled_losses:
-            scaled_losses.backward()
-
-        if not SHOW_COMP_GRAPH and get_rank() == 0:
-            try:
-                g = vis_graph.visual_computation_graph(
-                    losses, model.named_parameters(), cfg.OUTPUT_DIR, "total_loss-graph"
+    for epoch in range(3):
+        for iteration, (images, targets, _) in enumerate(train_data_loader, start_iter):
+            if any(len(target) < 1 for target in targets):
+                logger.error(
+                    f"Iteration={iteration + 1} || Image Ids used for training {_} || targets Length={[len(target) for target in targets]}"
                 )
-                g.render()
-                for name, ls in loss_dict_reduced.items():
+            data_time = time.time() - end
+            iteration = iteration + 1
+            arguments["iteration"] = iteration
+    
+            model.train()
+            fix_eval_modules(eval_modules)
+    
+            images = images.to(device)
+            targets = [target.to(device) for target in targets]
+    
+            loss_dict = model(images, targets, logger=logger)
+    
+            losses = sum(loss for loss in loss_dict.values())
+    
+            # reduce losses over all GPUs for logging purposes
+            loss_dict_reduced = reduce_loss_dict(loss_dict)
+            losses_reduced = sum(loss for loss in loss_dict_reduced.values())
+    
+            meters.update(loss=losses_reduced, **loss_dict_reduced)
+            optimizer.zero_grad()
+            # Note: If mixed precision is not used, this ends up doing nothing
+            # Otherwise apply loss scaling for mixed-precision recipe
+            # try:
+            with amp.scale_loss(losses, optimizer) as scaled_losses:
+                scaled_losses.backward()
+    
+            if not SHOW_COMP_GRAPH and get_rank() == 0:
+                try:
                     g = vis_graph.visual_computation_graph(
-                        losses, model.named_parameters(), cfg.OUTPUT_DIR, f"{name}-graph"
+                        losses, model.named_parameters(), cfg.OUTPUT_DIR, "total_loss-graph"
                     )
                     g.render()
-            except:
-                logger.info("print computational graph failed")
-
-            SHOW_COMP_GRAPH = True
-
-        # add clip_grad_norm from MOTIFS, tracking gradient, used for debug
-        verbose = (
-            iteration % cfg.SOLVER.PRINT_GRAD_FREQ
-        ) == 0 or print_first_grad  # print grad or not
-        print_first_grad = False
-        clip_grad_norm(
-            [(n, p) for n, p in model.named_parameters() if p.requires_grad],
-            max_norm=cfg.SOLVER.GRAD_NORM_CLIP,
-            logger=logger,
-            verbose=verbose,
-            clip=True,
-        )
-
-        optimizer.step()
-
-        batch_time = time.time() - end
-        end = time.time()
-        meters.update(time=batch_time, data=data_time)
-
-        eta_seconds = meters.time.global_avg * (max_iter - iteration)
-        eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
-        elapsed_time = str(datetime.timedelta(seconds=int(end - start_training_time)))
-
-        if (
-            iteration
-            in [
-                cfg.MODEL.ROI_RELATION_HEAD.RELATION_PROPOSAL_MODEL.FIX_MODEL_AT_ITER,
-            ]
-            and rel_on_module is not None
-        ):
-            logger.info("fix the rel pn module")
-            fix_eval_modules(rel_pn_module_ref)
-        
-        if cfg.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRETRAIN_MASK and iteration == STOP_ITER:
-            for n, p in model.named_parameters(): 
-                if n in trained_params: 
-                    p.requires_grad = True
-
-        if pre_clser_pretrain_on:
-            if iteration == STOP_ITER:
-                logger.info("pre clser pretraining ended.")
-                m2opt.roi_heads.relation.predictor.end_preclser_relpn_pretrain()
-                pre_clser_pretrain_on = False
-
-        if iteration % 30 == 0:
-            logger.log(TFBoardHandler_LEVEL, (meters.meters, iteration))
-
-            logger.log(
-                TFBoardHandler_LEVEL,
-                ({"curr_lr": float(optimizer.param_groups[0]["lr"])}, iteration),
+                    for name, ls in loss_dict_reduced.items():
+                        g = vis_graph.visual_computation_graph(
+                            losses, model.named_parameters(), cfg.OUTPUT_DIR, f"{name}-graph"
+                        )
+                        g.render()
+                except:
+                    logger.info("print computational graph failed")
+    
+                SHOW_COMP_GRAPH = True
+    
+            # add clip_grad_norm from MOTIFS, tracking gradient, used for debug
+            verbose = (
+                iteration % cfg.SOLVER.PRINT_GRAD_FREQ
+            ) == 0 or print_first_grad  # print grad or not
+            print_first_grad = False
+            clip_grad_norm(
+                [(n, p) for n, p in model.named_parameters() if p.requires_grad],
+                max_norm=cfg.SOLVER.GRAD_NORM_CLIP,
+                logger=logger,
+                verbose=verbose,
+                clip=True,
             )
-            # save_buffer(output_dir)
-
-        if iteration % 100 == 0 or iteration == max_iter:
-            logger.info(
-                meters.delimiter.join(
-                    [
-                        "\ninstance name: {instance_name}\n" "elapsed time: {elapsed_time}\n",
-                        "eta: {eta}\n",
-                        "iter: {iter}/{max_iter}\n",
-                        "{meters}",
-                        "lr: {lr:.6f}\n",
-                        "max mem: {memory:.0f}\n",
-                    ]
-                ).format(
-                    instance_name=cfg.OUTPUT_DIR[len("checkpoints/") :],
-                    eta=eta_string,
-                    elapsed_time=elapsed_time,
-                    iter=iteration,
-                    meters=str(meters),
-                    lr=optimizer.param_groups[0]["lr"],
-                    max_iter=max_iter,
-                    memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
-                )
-            )
+    
+            optimizer.step()
+    
+            batch_time = time.time() - end
+            end = time.time()
+            meters.update(time=batch_time, data=data_time)
+    
+            eta_seconds = meters.time.global_avg * (max_iter - iteration)
+            eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+            elapsed_time = str(datetime.timedelta(seconds=int(end - start_training_time)))
+    
+            if (
+                iteration
+                in [
+                    cfg.MODEL.ROI_RELATION_HEAD.RELATION_PROPOSAL_MODEL.FIX_MODEL_AT_ITER,
+                ]
+                and rel_on_module is not None
+            ):
+                logger.info("fix the rel pn module")
+                fix_eval_modules(rel_pn_module_ref)
+            
+            if cfg.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRETRAIN_MASK and iteration == STOP_ITER:
+                for n, p in model.named_parameters(): 
+                    if n in trained_params: 
+                        p.requires_grad = True
+    
             if pre_clser_pretrain_on:
-                logger.info("relness module pretraining..")
-
-        if iteration % checkpoint_period == 0:
-            checkpointer.save("model_{:07d}".format(iteration), **arguments)
-        if iteration == max_iter:
-            checkpointer.save("model_final", **arguments)
-
-        val_result_value = None  # used for scheduler updating
-        if cfg.SOLVER.TO_VAL and iteration % cfg.SOLVER.VAL_PERIOD == 0:
-            logger.info("Start validating")
-            val_result = run_val(cfg, model, val_data_loaders, distributed, logger)
-            val_result_value = val_result[1]
-            if get_rank() == 0:
-                for each_ds_eval in val_result[0]:
-                    for each_evalator_res in each_ds_eval[1]:
-                        logger.log(TFBoardHandler_LEVEL, (each_evalator_res, iteration))
-        # scheduler should be called after optimizer.step() in pytorch>=1.1.0
-        # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
-        if cfg.SOLVER.SCHEDULE.TYPE == "WarmupReduceLROnPlateau":
-            scheduler.step(val_result_value, epoch=iteration)
-            if scheduler.stage_count >= cfg.SOLVER.SCHEDULE.MAX_DECAY_STEP:
-                logger.info("Trigger MAX_DECAY_STEP at iteration {}.".format(iteration))
-                break
-        else:
-            scheduler.step()
+                if iteration == STOP_ITER:
+                    logger.info("pre clser pretraining ended.")
+                    m2opt.roi_heads.relation.predictor.end_preclser_relpn_pretrain()
+                    pre_clser_pretrain_on = False
+    
+            if iteration % 30 == 0:
+                logger.log(TFBoardHandler_LEVEL, (meters.meters, iteration))
+    
+                logger.log(
+                    TFBoardHandler_LEVEL,
+                    ({"curr_lr": float(optimizer.param_groups[0]["lr"])}, iteration),
+                )
+                # save_buffer(output_dir)
+    
+            if iteration % 100 == 0 or iteration == max_iter:
+                logger.info(
+                    meters.delimiter.join(
+                        [
+                            "\ninstance name: {instance_name}\n" "elapsed time: {elapsed_time}\n",
+                            "eta: {eta}\n",
+                            "epoch:{epo}\n",
+                            "iter: {iter}/{max_iter}\n",
+                            "{meters}",
+                            "lr: {lr:.6f}\n",
+                            "max mem: {memory:.0f}\n",
+                        ]
+                    ).format(
+                        instance_name=cfg.OUTPUT_DIR[len("checkpoints/") :],
+                        eta=eta_string,
+                        elapsed_time=elapsed_time,
+                        epo = epoch,
+                        iter=iteration,
+                        meters=str(meters),
+                        lr=optimizer.param_groups[0]["lr"],
+                        max_iter=max_iter,
+                        memory=torch.cuda.max_memory_allocated() / 1024.0 / 1024.0,
+                    )
+                )
+                if pre_clser_pretrain_on:
+                    logger.info("relness module pretraining..")
+    
+            if iteration % checkpoint_period == 0:
+                checkpointer.save("model_{:07d}".format(iteration), **arguments)
+            if iteration == max_iter:
+                checkpointer.save("model_final", **arguments)
+    
+            val_result_value = None  # used for scheduler updating
+            if cfg.SOLVER.TO_VAL and iteration % cfg.SOLVER.VAL_PERIOD == 0:
+                logger.info("Start validating")
+                val_result = run_val(cfg, model, val_data_loaders, distributed, logger)
+                val_result_value = val_result[1]
+                if get_rank() == 0:
+                    for each_ds_eval in val_result[0]:
+                        for each_evalator_res in each_ds_eval[1]:
+                            logger.log(TFBoardHandler_LEVEL, (each_evalator_res, iteration))
+            # scheduler should be called after optimizer.step() in pytorch>=1.1.0
+            # https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+            if cfg.SOLVER.SCHEDULE.TYPE == "WarmupReduceLROnPlateau":
+                scheduler.step(val_result_value, epoch=iteration)
+                if scheduler.stage_count >= cfg.SOLVER.SCHEDULE.MAX_DECAY_STEP:
+                    logger.info("Trigger MAX_DECAY_STEP at iteration {}.".format(iteration))
+                    break
+            else:
+                scheduler.step()
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
