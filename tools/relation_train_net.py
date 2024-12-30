@@ -376,9 +376,9 @@ def train(
         STOP_ITER = -1
 
     model.train()
-
+    max_epoch = 3
     print_first_grad = True
-    for epoch in range(3):
+    for epoch in range(max_epoch):
         for iteration, (images, targets, _) in enumerate(train_data_loader, start_iter):
             if any(len(target) < 1 for target in targets):
                 logger.error(
@@ -508,7 +508,7 @@ def train(
     
             if iteration % checkpoint_period == 0:
                 checkpointer.save("model_{:07d}".format(iteration), **arguments)
-            if iteration == max_iter:
+            if iteration == max_iter and epoch == max_epoch-1:
                 checkpointer.save("model_final", **arguments)
     
             val_result_value = None  # used for scheduler updating
