@@ -230,8 +230,8 @@ class SquatContext(nn.Module):
         decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first)
         num_layer = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.NUM_DECODER
         self.m2m_decoder = P2PDecoder(decoder_layer, num_layer)
-        self.obj_classifier = nn.Linear(2048, self.num_obj_cls)
-        self.rel_classifier = nn.Linear(2048, self.num_rel_cls)
+        self.obj_classifier = nn.Linear(self.hidden_dim, self.num_obj_cls)
+        self.rel_classifier = nn.Linear(self.pooling_dim, self.num_rel_cls)
         
         self.mask_predictor = MaskPredictor(self.pooling_dim, self.hidden_dim)
         self.mask_predictor_e2e = MaskPredictor(self.pooling_dim, self.hidden_dim)
