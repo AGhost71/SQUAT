@@ -376,7 +376,7 @@ def train(
         STOP_ITER = -1
 
     model.train()
-    max_epoch = 3
+    max_epoch = 20
     print_first_grad = True
     for epoch in range(max_epoch):
         for iteration, (images, targets, _) in enumerate(train_data_loader, start_iter):
@@ -508,8 +508,6 @@ def train(
     
             if iteration % checkpoint_period == 0:
                 checkpointer.save("model_{:07d}".format(iteration), **arguments)
-            if iteration == max_iter and epoch == max_epoch-1:
-                checkpointer.save("model_final", **arguments)
     
             val_result_value = None  # used for scheduler updating
             if cfg.SOLVER.TO_VAL and iteration % cfg.SOLVER.VAL_PERIOD == 0:
@@ -529,6 +527,8 @@ def train(
                     break
             else:
                 scheduler.step()
+        checkpointer.save("model_{:07d}_{:07d}".format(epoch,iteration), **arguments)
+    checkpointer.save("model_final", **arguments)
 
     total_training_time = time.time() - start_training_time
     total_time_str = str(datetime.timedelta(seconds=total_training_time))
