@@ -67,11 +67,12 @@ class P2PDecoder(nn.Module):
                 return memory[0], tgt 
             else: return tgt
         
-        for mod in self.layers:
-            unary, pair = mod(pair, memory, ind, tgt_mask=tgt_mask,
+        for i,mod in enumerate(self.layers):
+            unary, pair,tmp_loss = mod(pair, memory, ind, tgt_mask=tgt_mask,
                                memory_mask=memory_mask, 
                                tgt_key_padding_mask=tgt_key_padding_mask, 
                                memory_key_padding_mask=memory_key_padding_mask)
+            print(i,tmp_loss)
             
         if self.norm is not None:
             pair = self.norm(pair)
@@ -135,16 +136,18 @@ class P2PDecoderLayer(nn.Module):
         pair[ind_] = entire_pair[ind_]
         pair_e2e = pair[ind_e2e]
         pair_n2e = pair[ind_n2e]
-        
-        updated_pair = self.norm2(sparsified_pair + self._mha_e2e(sparsified_pair, pair_e2e, None, None) \
-                                                  + self._mha_e2n(sparsified_pair, sparsified_unary, None, None)) 
+        e2e = self._mha_e2e(sparsified_pair, pair_e2e, None, None)
+        e2n = self._mha_e2n(sparsified_pair, sparsified_unary, None, None)
+        tmp_loss = torch.norm(e2e - e2n, p=2)
+        updated_pair = self.norm2(sparsified_pair + e2e \
+                                                    + e2n) 
         updated_pair = self.norm3(updated_pair + self._ff_block_edge(updated_pair)) 
         
         updated_unary = self.norm2(sparsified_unary + self._mha_n2e(sparsified_unary, pair_n2e, None, None) \
                                                     + self._mha_n2n(sparsified_unary, sparsified_unary, None, None)) 
         updated_unary = self.norm3(updated_unary + self._ff_block_node(updated_unary)) 
         
-        return updated_unary, updated_pair
+        return updated_unary, updated_pair,tmp_loss
 
     def _sa_block(self, x, attn_mask, key_padding_mask): 
         x = self.self_attn(x, x, x, attn_mask=attn_mask, 
