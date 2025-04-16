@@ -67,12 +67,11 @@ class P2PDecoder(nn.Module):
                 return memory[0], tgt 
             else: return tgt
         
-        for i,mod in enumerate(self.layers):
-            unary, pair,tmp_loss = mod(pair, memory, ind, tgt_mask=tgt_mask,
+        for mod in self.layers:
+            unary, pair = mod(pair, memory, ind, tgt_mask=tgt_mask,
                                memory_mask=memory_mask, 
                                tgt_key_padding_mask=tgt_key_padding_mask, 
                                memory_key_padding_mask=memory_key_padding_mask)
-            print(i,tmp_loss)
             
         if self.norm is not None:
             pair = self.norm(pair)
@@ -85,7 +84,7 @@ class P2PDecoder(nn.Module):
     
     
 class P2PDecoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu, norm_first=False):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu, norm_first=False,c_loss=None):
         super(P2PDecoderLayer, self).__init__() 
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.self_attn_node = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -118,6 +117,8 @@ class P2PDecoderLayer(nn.Module):
         self.dropout3_unary = nn.Dropout(dropout)
         
         self.activation = activation
+        if c_loss:
+            self.c_loss = c_loss
         
     def forward(self, tgt, memory, ind, tgt_mask=None, memory_mask=None, 
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
@@ -138,7 +139,7 @@ class P2PDecoderLayer(nn.Module):
         pair_n2e = pair[ind_n2e]
         e2e = self._mha_e2e(sparsified_pair, pair_e2e, None, None)
         e2n = self._mha_e2n(sparsified_pair, sparsified_unary, None, None)
-        tmp_loss = torch.norm(e2e - e2n, p=2)
+        self.c_loss(e2e,e2n)
         updated_pair = self.norm2(sparsified_pair + e2e \
                                                     + e2n) 
         updated_pair = self.norm3(updated_pair + self._ff_block_edge(updated_pair)) 
@@ -147,7 +148,7 @@ class P2PDecoderLayer(nn.Module):
                                                     + self._mha_n2n(sparsified_unary, sparsified_unary, None, None)) 
         updated_unary = self.norm3(updated_unary + self._ff_block_node(updated_unary)) 
         
-        return updated_unary, updated_pair,tmp_loss
+        return updated_unary, updated_pair
 
     def _sa_block(self, x, attn_mask, key_padding_mask): 
         x = self.self_attn(x, x, x, attn_mask=attn_mask, 
@@ -205,7 +206,7 @@ class P2PDecoderLayer(nn.Module):
         
         
 class SquatContext(nn.Module):
-    def __init__(self, config, in_channels, hidden_dim=512, num_iter=3):
+    def __init__(self, config, in_channels, hidden_dim=512, num_iter=3,c_loss=None):
         super(SquatContext, self).__init__()
 
         self.cfg = config
@@ -228,9 +229,9 @@ class SquatContext(nn.Module):
             nn.Linear(self.hidden_dim, self.pooling_dim),
             nn.ReLU()
         )
-            
+        
         norm_first = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRE_NORM
-        decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first)
+        decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first,c_loss=c_loss)
         num_layer = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.NUM_DECODER
         self.m2m_decoder = P2PDecoder(decoder_layer, num_layer)
         self.obj_classifier = nn.Linear(self.hidden_dim, self.num_obj_cls)

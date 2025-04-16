@@ -2,13 +2,52 @@
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
-
+import matplotlib.pyplot as plt
 from pysgg.layers import Label_Smoothing_Regression
 from pysgg.modeling.matcher import Matcher
 from pysgg.modeling.utils import cat
 from pysgg.config import cfg
 
+class ConsistencyLoss(object):
+    def __init__(self,delta):
+        self.delta = delta
+        self.tmp = 0
+        self.loss = []
+    def __call__(self,e2n,e2e):
+        e2e = e2e.squeeze(1)
+        e2n = e2n.squeeze(1)
+        dist_squared = torch.norm(e2e - e2n, p=2, dim=1)
+        #losses = torch.clamp(dist_squared - self.delta, min=0.0)
+        self.loss.append(dist_squared)
+        if len(self.loss) == 300:
+            data = torch.cat(self.loss,dim=1)
+            data_f = data.flatten()
+            values, counts = torch.unique(data_f, return_counts=True)
 
+            # Convert to NumPy for plotting
+            values = values.numpy()
+            counts = counts.numpy()
+
+            # Create the scatter plot
+            plt.figure(figsize=(8, 5))
+            plt.scatter(values, counts, color='red', edgecolor='black', s=100)
+            plt.xlabel("Value")
+            plt.ylabel("Quantity")
+            plt.title("Value Distribution in Tensor (Scatter Plot)")
+            plt.xticks(values)
+            plt.grid(True, linestyle='--', alpha=0.7)
+
+            # Save the plot as a PNG file
+            plt.savefig("consistency_distribution_scatter{c}.png".format(self.tmp), dpi=300, bbox_inches='tight')
+            plt.close()
+            self.loss = []
+    def get_loss(self):
+        res = 0
+        for loss in self.loss:
+            res += loss
+        self.loss = []
+        return res
+        
 class RelationLossComputation(object):
     """
     Computes the loss for relation triplet.

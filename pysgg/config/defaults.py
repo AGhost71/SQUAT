@@ -834,3 +834,5 @@ _C.DTYPE = "float32"
 
 # Enable verbosity in apex.amp
 _C.AMP_VERBOSE = False
+
+_C.DELTA = 0.5 

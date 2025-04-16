@@ -40,7 +40,7 @@ from .rel_proposal_network.loss import (
     RelAwareLoss,
 )
 from .utils_relation import layer_init, get_box_info, get_box_pair_info, obj_prediction_nms
-
+from .loss import ConsistencyLoss
 
 @registry.ROI_RELATION_PREDICTOR.register("SquatPredictor")
 class SquatPredictor(nn.Module): 
@@ -66,8 +66,8 @@ class SquatPredictor(nn.Module):
         self.hidden_dim = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.GRAPH_HIDDEN_DIM
         self.loss_coef = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.LOSS_COEF
 
-        # self.split_context_model4inst_rel = config.MODEL.ROI_RELATION_HEAD.GRCNN_MODULE.SPLIT_GRAPH4OBJ_REL
-
+        # self.split_context_model4inst_rel = config.MODEL.ROI_RELATION_HEAD.GRCNN_MODULE.SPLIT_J_REL
+        self.c_loss = ConsistencyLoss(delta=cfg.DELTA)
         self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim)
         self.rel_feature_type = config.MODEL.ROI_RELATION_HEAD.EDGE_FEATURES_REPRESENTATION
 
@@ -82,6 +82,7 @@ class SquatPredictor(nn.Module):
             statistics = get_dataset_statistics(config)
             self.freq_bias = FrequencyBias(config, statistics)
             self.statistics = statistics
+        
         
     def forward(self, inst_proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None): 
         """
@@ -101,7 +102,7 @@ class SquatPredictor(nn.Module):
             union_features (Tensor): (batch_num_rel, context_pooling_dim): visual union feature of each pair
         """
         score_obj, score_rel, masks = self.context_layer(
-            roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys
+            roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys,c_loss=self.c_loss
         ) # masks : [list[Tensor]]
         rel_cls_logits = score_rel
         
@@ -176,6 +177,7 @@ class SquatPredictor(nn.Module):
             losses.append(loss)
         losses = sum(losses) / len(losses)
         add_losses['loss_mask_n2e'] = losses / 3. * self.loss_coef
+        #add_losses['consistency_loss'] = self.c_loss.get_loss()
             
         obj_pred_logits = obj_pred_logits.split(num_objs, dim=0)
         rel_cls_logits = rel_cls_logits.split(num_rels, dim=0)
