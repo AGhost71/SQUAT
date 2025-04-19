@@ -17,29 +17,25 @@ class ConsistencyLoss(object):
         e2e = e2e.squeeze(1)
         e2n = e2n.squeeze(1)
         dist_squared = torch.norm(e2e - e2n, p=2, dim=1)
+        print(dist_squared.shape)
         #losses = torch.clamp(dist_squared - self.delta, min=0.0)
         self.loss.append(dist_squared)
         if len(self.loss) == 300:
-            data = torch.cat(self.loss,dim=1)
+            data = torch.cat(self.loss,dim=-1)
             data_f = data.flatten()
-            values, counts = torch.unique(data_f, return_counts=True)
-
-            # Convert to NumPy for plotting
-            values = values.numpy()
-            counts = counts.numpy()
+            data_f = data_f.cpu()
 
             # Create the scatter plot
-            plt.figure(figsize=(8, 5))
-            plt.scatter(values, counts, color='red', edgecolor='black', s=100)
-            plt.xlabel("Value")
-            plt.ylabel("Quantity")
-            plt.title("Value Distribution in Tensor (Scatter Plot)")
-            plt.xticks(values)
-            plt.grid(True, linestyle='--', alpha=0.7)
-
+            plt.figure(figsize=(10, 6))
+            plt.hist(data_f, bins=30, color='skyblue', edgecolor='black')
+            plt.xlabel("Value (Binned)")
+            plt.ylabel("Frequency")
+            plt.title("Value Distribution in Tensor (Histogram)")
+            plt.grid(axis='y', linestyle='--', alpha=0.7)
             # Save the plot as a PNG file
-            plt.savefig("consistency_distribution_scatter{c}.png".format(self.tmp), dpi=300, bbox_inches='tight')
+            plt.savefig("consistency_distribution_scatter{0}.png".format(self.tmp), dpi=300, bbox_inches='tight')
             plt.close()
+            self.tmp += 1
             self.loss = []
     def get_loss(self):
         res = 0

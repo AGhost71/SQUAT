@@ -541,3 +541,4 @@ TEST:
     REQUIRE_OVERLAP: false
     SYNC_GATHER: true
   SAVE_PROPOSALS: false
+DELTA : .3

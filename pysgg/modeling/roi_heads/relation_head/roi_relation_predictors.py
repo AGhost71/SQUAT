@@ -68,7 +68,7 @@ class SquatPredictor(nn.Module):
 
         # self.split_context_model4inst_rel = config.MODEL.ROI_RELATION_HEAD.GRCNN_MODULE.SPLIT_J_REL
         self.c_loss = ConsistencyLoss(delta=cfg.DELTA)
-        self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim)
+        self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim,c_loss=self.c_loss)
         self.rel_feature_type = config.MODEL.ROI_RELATION_HEAD.EDGE_FEATURES_REPRESENTATION
 
         self.use_obj_recls_logits = config.MODEL.ROI_RELATION_HEAD.REL_OBJ_MULTI_TASK_LOSS
@@ -102,7 +102,7 @@ class SquatPredictor(nn.Module):
             union_features (Tensor): (batch_num_rel, context_pooling_dim): visual union feature of each pair
         """
         score_obj, score_rel, masks = self.context_layer(
-            roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys,c_loss=self.c_loss
+            roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys
         ) # masks : [list[Tensor]]
         rel_cls_logits = score_rel
         
