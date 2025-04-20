@@ -67,7 +67,10 @@ class SquatPredictor(nn.Module):
         self.loss_coef = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.LOSS_COEF
 
         # self.split_context_model4inst_rel = config.MODEL.ROI_RELATION_HEAD.GRCNN_MODULE.SPLIT_J_REL
-        self.c_loss = ConsistencyLoss(delta=cfg.DELTA)
+        if self.cfg.CONSISTENCY_LOSS:
+            self.c_loss = ConsistencyLoss(delta=cfg.CONSISTENCY.DELTA)
+        else:
+            self.c_loss = None
         self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim,c_loss=self.c_loss)
         self.rel_feature_type = config.MODEL.ROI_RELATION_HEAD.EDGE_FEATURES_REPRESENTATION
 
@@ -177,7 +180,8 @@ class SquatPredictor(nn.Module):
             losses.append(loss)
         losses = sum(losses) / len(losses)
         add_losses['loss_mask_n2e'] = losses / 3. * self.loss_coef
-        #add_losses['consistency_loss'] = self.c_loss.get_loss()
+        if self.c_loss:
+            add_losses['consistency_loss'] = self.c_loss.get_loss()
             
         obj_pred_logits = obj_pred_logits.split(num_objs, dim=0)
         rel_cls_logits = rel_cls_logits.split(num_rels, dim=0)
