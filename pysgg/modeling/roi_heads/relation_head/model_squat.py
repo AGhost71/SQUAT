@@ -10,6 +10,13 @@ from pysgg.modeling.roi_heads.relation_head.model_msg_passing import (
 import copy
 from pysgg.modeling.roi_heads.relation_head.model_transformer import TransformerEncoder
 
+def consistency_loss(e2e,e2n,delta):
+    e2e = e2e.squeeze(1)
+    e2n = e2n.squeeze(1)
+    dist_squared = torch.norm(e2e - e2n, p=2, dim=1)
+        
+    losses = torch.clamp(dist_squared - delta, min=0.0).mean()
+    return losses
 
 def set_diff(a, b):
     combined = torch.cat((a, b))
@@ -66,12 +73,13 @@ class P2PDecoder(nn.Module):
             if self.unary_output:
                 return memory[0], tgt 
             else: return tgt
-        
+        losses = []
         for mod in self.layers:
-            unary, pair = mod(pair, memory, ind, tgt_mask=tgt_mask,
+            unary, pair,loss = mod(pair, memory, ind, tgt_mask=tgt_mask,
                                memory_mask=memory_mask, 
                                tgt_key_padding_mask=tgt_key_padding_mask, 
                                memory_key_padding_mask=memory_key_padding_mask)
+            losses.append(loss)
             
         if self.norm is not None:
             pair = self.norm(pair)
@@ -80,11 +88,11 @@ class P2PDecoder(nn.Module):
         if self.unary_output: 
             return unary, pair
         
-        return pair
+        return pair,torch.stack(losses).mean()
     
     
 class P2PDecoderLayer(nn.Module):
-    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu, norm_first=False,c_loss=None):
+    def __init__(self, d_model, nhead, dim_feedforward=2048, dropout=0.1, activation=F.relu, norm_first=False,delta):
         super(P2PDecoderLayer, self).__init__() 
         self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
         self.self_attn_node = nn.MultiheadAttention(d_model, nhead, dropout=dropout)
@@ -115,10 +123,8 @@ class P2PDecoderLayer(nn.Module):
         self.dropout1_unary = nn.Dropout(dropout)
         self.dropout2_unary = nn.Dropout(dropout)
         self.dropout3_unary = nn.Dropout(dropout)
-        
+        self.delta = delta
         self.activation = activation
-        if c_loss:
-            self.c_loss = c_loss
         
     def forward(self, tgt, memory, ind, tgt_mask=None, memory_mask=None, 
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
@@ -139,7 +145,7 @@ class P2PDecoderLayer(nn.Module):
         pair_n2e = pair[ind_n2e]
         e2e = self._mha_e2e(sparsified_pair, pair_e2e, None, None)
         e2n = self._mha_e2n(sparsified_pair, sparsified_unary, None, None)
-        self.c_loss(e2e,e2n)
+        c_loss = consistency_loss(e2e,e2n,self.delta)
         updated_pair = self.norm2(sparsified_pair + e2e \
                                                     + e2n) 
         updated_pair = self.norm3(updated_pair + self._ff_block_edge(updated_pair)) 
@@ -148,7 +154,7 @@ class P2PDecoderLayer(nn.Module):
                                                     + self._mha_n2n(sparsified_unary, sparsified_unary, None, None)) 
         updated_unary = self.norm3(updated_unary + self._ff_block_node(updated_unary)) 
         
-        return updated_unary, updated_pair
+        return updated_unary, updated_pair,c_loss
 
     def _sa_block(self, x, attn_mask, key_padding_mask): 
         x = self.self_attn(x, x, x, attn_mask=attn_mask, 
@@ -206,7 +212,7 @@ class P2PDecoderLayer(nn.Module):
         
         
 class SquatContext(nn.Module):
-    def __init__(self, config, in_channels, hidden_dim=512, num_iter=3,c_loss=None):
+    def __init__(self, config, in_channels, hidden_dim=512, num_iter=3):
         super(SquatContext, self).__init__()
 
         self.cfg = config
@@ -231,7 +237,7 @@ class SquatContext(nn.Module):
         )
         
         norm_first = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRE_NORM
-        decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first,c_loss=c_loss)
+        decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first,delta=config.MODEL.CONSISTENCY.DELTA)
         num_layer = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.NUM_DECODER
         self.m2m_decoder = P2PDecoder(decoder_layer, num_layer)
         self.obj_classifier = nn.Linear(self.hidden_dim, self.num_obj_cls)
@@ -298,7 +304,7 @@ class SquatContext(nn.Module):
         
         augment_obj_feat = torch.split(augment_obj_feat, [len(proposal) for proposal in proposals])
         
-        feat_pred_batch = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)).squeeze(1) \
+        feat_pred_batch,loss = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)).squeeze(1) \
                            for p, u, q, ind, ind_e2e, ind_n2e in \
                            zip(feat_pred_batch_key, augment_obj_feat, feat_pred_batch_query, top_inds, top_inds_e2e, top_inds_n2e)]
         
@@ -317,7 +323,7 @@ class SquatContext(nn.Module):
         score_obj = self.obj_classifier(feat_obj)
         score_pred = self.rel_classifier(feat_pred_)
         
-        return score_obj, score_pred, (masks, masks_e2e, masks_n2e)
+        return score_obj, score_pred, (masks, masks_e2e, masks_n2e),loss
 
     def set_pretrain_pre_clser_mode(self, val=True):
         self.pretrain_pre_clser_mode = val
