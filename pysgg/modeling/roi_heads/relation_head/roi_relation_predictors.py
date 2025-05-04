@@ -83,7 +83,7 @@ class SquatPredictor(nn.Module):
             self.freq_bias = FrequencyBias(config, statistics)
             self.statistics = statistics
         
-        
+        self.landa = config.MODEL.CONSISTENCY.LANDA
     def forward(self, inst_proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None): 
         """
         :param inst_proposals:
@@ -178,7 +178,7 @@ class SquatPredictor(nn.Module):
         losses = sum(losses) / len(losses)
         add_losses['loss_mask_n2e'] = losses / 3. * self.loss_coef
         
-        add_losses['consistency_loss'] = c_loss
+        add_losses['consistency_loss'] = c_loss * self.landa
             
         obj_pred_logits = obj_pred_logits.split(num_objs, dim=0)
         rel_cls_logits = rel_cls_logits.split(num_rels, dim=0)

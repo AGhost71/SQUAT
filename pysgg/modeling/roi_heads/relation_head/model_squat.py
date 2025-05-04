@@ -13,10 +13,9 @@ from pysgg.modeling.roi_heads.relation_head.model_transformer import Transformer
 def consistency_loss(e2e,e2n,delta):
     e2e = e2e.squeeze(1)
     e2n = e2n.squeeze(1)
-    dist_squared = torch.norm(e2e - e2n, p=2, dim=1)
+    dist_squared = torch.norm(e2e - e2n, p=2)
         
-    losses = torch.clamp(dist_squared - delta, min=0.0).mean()
-    return losses
+    return dist_squared
 
 def set_diff(a, b):
     combined = torch.cat((a, b))
@@ -304,10 +303,11 @@ class SquatContext(nn.Module):
         
         augment_obj_feat = torch.split(augment_obj_feat, [len(proposal) for proposal in proposals])
         
-        feat_pred_batch,loss = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)).squeeze(1) \
+        Decoder_Res = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)) \
                            for p, u, q, ind, ind_e2e, ind_n2e in \
                            zip(feat_pred_batch_key, augment_obj_feat, feat_pred_batch_query, top_inds, top_inds_e2e, top_inds_n2e)]
-        
+        feat_pred_batch = Decoder_Res[0][0]
+        loss = Decoder_Res[0][1]
         entire_sets = [set(range(mask.size(0))) for mask in masks]
             
         feat_pred_batch_ = []

@@ -491,6 +491,7 @@ MODEL:
   WEIGHT: catalog://ImageNetPretrained/FAIR/20171220/X-101-32x8d
   CONSISTENCY:
     DELTA: 16
+    LaNDA: 0.005
 OUTPUT_DIR: checkpoints/sgdet-SedanKeySparsePredictor/(2022-11-09_12)FinalExp3(resampling)
 PATHS_CATALOG: pysgg/config/paths_catalog.py
 PATHS_DATA: pysgg/config/../data/datasets
@@ -543,4 +544,3 @@ TEST:
     REQUIRE_OVERLAP: false
     SYNC_GATHER: true
   SAVE_PROPOSALS: false
-DELTA : 16
