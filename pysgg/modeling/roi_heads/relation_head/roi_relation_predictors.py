@@ -70,7 +70,7 @@ class SquatPredictor(nn.Module):
 
         self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim)
         self.rel_feature_type = config.MODEL.ROI_RELATION_HEAD.EDGE_FEATURES_REPRESENTATION
-
+        self.consistency_loss = nn.KLDivLoss(reduction='batchmean')
         self.use_obj_recls_logits = config.MODEL.ROI_RELATION_HEAD.REL_OBJ_MULTI_TASK_LOSS
         self.obj_recls_logits_update_manner = (
             config.MODEL.ROI_RELATION_HEAD.OBJECT_CLASSIFICATION_MANNER
@@ -101,7 +101,7 @@ class SquatPredictor(nn.Module):
             rel_pair_idxs (list[Tensor]): (num_rel, 2) index of subject and object
             union_features (Tensor): (batch_num_rel, context_pooling_dim): visual union feature of each pair
         """
-        score_obj, score_rel, masks,c_loss = self.context_layer(
+        score_obj, score_rel,score_e2e,score_e2n, masks = self.context_layer(
             roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys
         ) # masks : [list[Tensor]]
         rel_cls_logits = score_rel
@@ -178,7 +178,7 @@ class SquatPredictor(nn.Module):
         losses = sum(losses) / len(losses)
         add_losses['loss_mask_n2e'] = losses / 3. * self.loss_coef
         
-        add_losses['consistency_loss'] = c_loss * self.landa
+        add_losses['consistency_loss'] = self.consistency_loss(score_e2e,score_rel) + self.consistency_loss(score_e2n,score_rel)
             
         obj_pred_logits = obj_pred_logits.split(num_objs, dim=0)
         rel_cls_logits = rel_cls_logits.split(num_rels, dim=0)
