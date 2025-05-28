@@ -126,7 +126,7 @@ class P2PDecoderLayer(nn.Module):
         sparsified_unary, entire_pair = memory 
         ind_pair, ind_e2e, ind_n2e = ind 
         sparsified_pair = self.norm1(sparsified_pair + self._sa_block(sparsified_pair, None, None))
-        if not (e2e_feature and e2n_feature):
+        if e2e_feature is None and e2n_feature is None:
             e2e_feature = sparsified_pair
             e2n_feature = sparsified_pair
         else:
@@ -142,7 +142,7 @@ class P2PDecoderLayer(nn.Module):
         pair_n2e = pair[ind_n2e]
 
         e2e_updated = self.update_pair(e2e_feature,pair,ind_pair,ind_e2e=ind_e2e)
-        e2n_updated = self.update_pair(e2n_feature,pair,ind_pair)
+        e2n_updated = self.update_pair(e2n_feature,pair,ind_pair,sparsified_unary=sparsified_unary)
         updated_pair = self.update_pair(sparsified_pair,pair,ind_pair,ind_e2e=ind_e2e,sparsified_unary=sparsified_unary)
         
         
@@ -163,6 +163,7 @@ class P2PDecoderLayer(nn.Module):
             pair_e2e = pair[ind_e2e]
             updated_pair = self.norm2(features + self._mha_e2e(features, pair_e2e, None, None))
         else:
+            #print(type(ind_e2e),type(sparsified_unary))
             updated_pair = self.norm2(features + self._mha_e2n(features, sparsified_unary, None, None))
         updated_pair = self.norm3(updated_pair + self._ff_block_edge(updated_pair)) 
         return updated_pair
@@ -248,7 +249,7 @@ class SquatContext(nn.Module):
         )
         
         norm_first = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRE_NORM
-        decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first,delta=config.MODEL.CONSISTENCY.DELTA)
+        decoder_layer = P2PDecoderLayer(self.pooling_dim, 8, self.hidden_dim * 2, norm_first=norm_first)
         num_layer = config.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.NUM_DECODER
         self.m2m_decoder = P2PDecoder(decoder_layer, num_layer)
         self.obj_classifier = nn.Linear(self.hidden_dim, self.num_obj_cls)
@@ -329,7 +330,7 @@ class SquatContext(nn.Module):
         score_pred = self.rel_classifier(feat_pred_[0])
         score_e2e = self.e2e_classifier(feat_pred_[1])
         score_e2n = self.e2n_classifier(feat_pred_[2])
-        return score_obj, score_pred,score_e2e,score_e2n (masks, masks_e2e, masks_n2e)
+        return score_obj, score_pred,score_e2e,score_e2n, (masks, masks_e2e, masks_n2e)
 
     def set_pretrain_pre_clser_mode(self, val=True):
         self.pretrain_pre_clser_mode = val
@@ -349,4 +350,6 @@ class SquatContext(nn.Module):
             feat_pred_ = torch.cat(feat_pred_batch_, dim=0)
             results.append(feat_pred_)
         return results
+        
+
         

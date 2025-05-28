@@ -70,7 +70,7 @@ class SquatPredictor(nn.Module):
 
         self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim)
         self.rel_feature_type = config.MODEL.ROI_RELATION_HEAD.EDGE_FEATURES_REPRESENTATION
-        self.consistency_loss = nn.KLDivLoss(reduction='batchmean')
+        self.consistency_loss = nn.MSELoss()
         self.use_obj_recls_logits = config.MODEL.ROI_RELATION_HEAD.REL_OBJ_MULTI_TASK_LOSS
         self.obj_recls_logits_update_manner = (
             config.MODEL.ROI_RELATION_HEAD.OBJECT_CLASSIFICATION_MANNER
