@@ -178,7 +178,7 @@ class SquatPredictor(nn.Module):
         losses = sum(losses) / len(losses)
         add_losses['loss_mask_n2e'] = losses / 3. * self.loss_coef
         
-        add_losses['consistency_loss'] = self.consistency_loss(score_e2e,score_rel) + self.consistency_loss(score_e2n,score_rel)
+        add_losses['consistency_loss'] = self.landa*(self.consistency_loss(score_e2e,score_rel) + self.consistency_loss(score_e2n,score_rel))
             
         obj_pred_logits = obj_pred_logits.split(num_objs, dim=0)
         rel_cls_logits = rel_cls_logits.split(num_rels, dim=0)
