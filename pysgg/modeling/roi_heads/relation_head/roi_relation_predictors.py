@@ -42,6 +42,27 @@ from .rel_proposal_network.loss import (
 from .utils_relation import layer_init, get_box_info, get_box_pair_info, obj_prediction_nms
 from .loss import ConsistencyLoss
 
+class MarginMSELoss(nn.Module):
+    def __init__(self, margin: float = 0.0, reduction: str = 'mean'):
+        super().__init__()
+        self.margin = margin
+        self.reduction = reduction
+
+    def forward(self, prediction, target):
+        error = prediction - target
+        abs_error = torch.abs(error)
+
+        # Apply margin: only penalize if error > margin
+        penalized_error = torch.where(abs_error > self.margin, error, torch.zeros_like(error))
+        loss = penalized_error ** 2
+
+        if self.reduction == 'mean':
+            return loss.mean()
+        elif self.reduction == 'sum':
+            return loss.sum()
+        else:
+            return loss  # no reduction
+        
 @registry.ROI_RELATION_PREDICTOR.register("SquatPredictor")
 class SquatPredictor(nn.Module): 
     def __init__(self, config, in_channels):
@@ -70,7 +91,6 @@ class SquatPredictor(nn.Module):
 
         self.context_layer = SquatContext(config, in_channels, hidden_dim=self.hidden_dim)
         self.rel_feature_type = config.MODEL.ROI_RELATION_HEAD.EDGE_FEATURES_REPRESENTATION
-        self.consistency_loss = nn.MSELoss()
         self.use_obj_recls_logits = config.MODEL.ROI_RELATION_HEAD.REL_OBJ_MULTI_TASK_LOSS
         self.obj_recls_logits_update_manner = (
             config.MODEL.ROI_RELATION_HEAD.OBJECT_CLASSIFICATION_MANNER
@@ -84,7 +104,10 @@ class SquatPredictor(nn.Module):
             self.statistics = statistics
         
         self.landa = config.MODEL.CONSISTENCY.LANDA
-    def forward(self, inst_proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None): 
+        self.margin = config.MODEL.CONSISTENCY.MARGIN
+        self.start_consistency = config.MODEL.CONSISTENCY.START
+        self.consistency_loss = MarginMSELoss(self.margin,'mean')
+    def forward(self, inst_proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features,iteration, logger=None): 
         """
         :param inst_proposals:
         :param rel_pair_idxs:
@@ -102,7 +125,7 @@ class SquatPredictor(nn.Module):
             union_features (Tensor): (batch_num_rel, context_pooling_dim): visual union feature of each pair
         """
         score_obj, score_rel,score_e2e,score_e2n, masks = self.context_layer(
-            roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys
+            roi_features, inst_proposals, union_features, rel_pair_idxs, rel_binarys,iteration=iteration
         ) # masks : [list[Tensor]]
         rel_cls_logits = score_rel
         
@@ -177,8 +200,9 @@ class SquatPredictor(nn.Module):
             losses.append(loss)
         losses = sum(losses) / len(losses)
         add_losses['loss_mask_n2e'] = losses / 3. * self.loss_coef
-        
-        add_losses['consistency_loss'] = self.landa*(self.consistency_loss(score_e2e,score_rel) + self.consistency_loss(score_e2n,score_rel))
+
+        if iteration > self.start_consistency: 
+            add_losses['consistency_loss'] = (self.consistency_loss(score_e2e,score_rel) + self.consistency_loss(score_e2n,score_rel))
             
         obj_pred_logits = obj_pred_logits.split(num_objs, dim=0)
         rel_cls_logits = rel_cls_logits.split(num_rels, dim=0)

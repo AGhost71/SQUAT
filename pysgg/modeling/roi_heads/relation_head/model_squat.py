@@ -60,7 +60,7 @@ class P2PDecoder(nn.Module):
         self.norm = norm
         self.unary_output = unary_output
         
-    def forward(self, tgt, memory, ind, tgt_mask=None, memory_mask=None, 
+    def forward(self, tgt, memory, ind,consistency_flag=False, tgt_mask=None, memory_mask=None, 
                 tgt_key_padding_mask=None, memory_key_padding_mask=None):
         pair = tgt 
         if self.num_layers == 0: 
@@ -70,7 +70,7 @@ class P2PDecoder(nn.Module):
         e2e_pair=None
         e2n_pair=None
         for mod in self.layers:
-            unary, pair,e2e_pair,e2n_pair = mod(pair, memory, ind, tgt_mask=tgt_mask,
+            unary, pair,e2e_pair,e2n_pair = mod(pair, memory, ind,consistency_flag, tgt_mask=tgt_mask,
                                memory_mask=memory_mask, 
                                tgt_key_padding_mask=tgt_key_padding_mask, 
                                memory_key_padding_mask=memory_key_padding_mask,e2e_feature=e2e_pair, e2n_feature=e2n_pair)
@@ -119,19 +119,21 @@ class P2PDecoderLayer(nn.Module):
         self.dropout3_unary = nn.Dropout(dropout)
         self.activation = activation
         
-    def forward(self, tgt, memory, ind, tgt_mask=None, memory_mask=None, 
+    def forward(self, tgt, memory, ind,consistency_flag=False, tgt_mask=None, memory_mask=None, 
                 tgt_key_padding_mask=None, memory_key_padding_mask=None,e2e_feature=None, e2n_feature=None):
         
         sparsified_pair = tgt
         sparsified_unary, entire_pair = memory 
         ind_pair, ind_e2e, ind_n2e = ind 
         sparsified_pair = self.norm1(sparsified_pair + self._sa_block(sparsified_pair, None, None))
-        if e2e_feature is None and e2n_feature is None:
-            e2e_feature = sparsified_pair
-            e2n_feature = sparsified_pair
-        else:
-            e2e_feature = self.norm1(e2e_feature + self._sa_block(e2e_feature, None, None))
-            e2n_feature = self.norm1(e2n_feature + self._sa_block(e2n_feature, None, None))
+        
+        if consistency_flag:
+            if e2e_feature is None and e2n_feature is None:
+                e2e_feature = sparsified_pair
+                e2n_feature = sparsified_pair
+            else:
+                e2e_feature = self.norm1(e2e_feature + self._sa_block(e2e_feature, None, None))
+                e2n_feature = self.norm1(e2n_feature + self._sa_block(e2n_feature, None, None))
         sparsified_unary = self.norm1_unary(sparsified_unary + self._sa_node_block(sparsified_unary, None, None))
         pair = torch.zeros_like(entire_pair)
         ind_ = torch.logical_not((torch.arange(pair.size(0), device=entire_pair.device).unsqueeze(1) == ind_pair).any(1))
@@ -140,9 +142,9 @@ class P2PDecoderLayer(nn.Module):
         pair[ind_] = entire_pair[ind_]
         #pair_e2e = pair[ind_e2e]
         pair_n2e = pair[ind_n2e]
-
-        e2e_updated = self.update_pair(e2e_feature,pair,ind_pair,ind_e2e=ind_e2e)
-        e2n_updated = self.update_pair(e2n_feature,pair,ind_pair,sparsified_unary=sparsified_unary)
+        if consistency_flag:
+            e2e_updated = self.update_pair(e2e_feature,pair,ind_pair,ind_e2e=ind_e2e)
+            e2n_updated = self.update_pair(e2n_feature,pair,ind_pair,sparsified_unary=sparsified_unary)
         updated_pair = self.update_pair(sparsified_pair,pair,ind_pair,ind_e2e=ind_e2e,sparsified_unary=sparsified_unary)
         
         
@@ -267,6 +269,7 @@ class SquatContext(nn.Module):
 
         self.dropout_rate = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.DROPOUT_RATE        
         self.num_head = self.cfg.MODEL.ROI_RELATION_HEAD.TRANSFORMER.NUM_HEAD
+        self.start_consistency = config.MODEL.CONSISTENCY.START
         
 
 
@@ -292,11 +295,15 @@ class SquatContext(nn.Module):
 
         return rel_inds, obj_obj_map, obj_num
 
-    def forward(self, roi_features, proposals, union_features, rel_pair_idxs, rel_gt_binarys=None, logger=None):
+    def forward(self, roi_features, proposals, union_features, rel_pair_idxs, rel_gt_binarys=None, logger=None,iteration=0):
         num_rels = [rel_pair_idx.size(0) for rel_pair_idx in rel_pair_idxs]
         num_objs = [len(p) for p in proposals]
         rel_inds, obj_obj_map, obj_num = self._get_map_idx(proposals, rel_pair_idxs)
-        
+        consistency_flag = False
+        if self.training:
+            if iteration > self.start_consistency:
+                consistency_flag = True
+
         feat_obj = self.obj_embedding(roi_features)
         augment_obj_feat, feat_pred = self.pairwise_feature_extractor(
             roi_features,
@@ -318,7 +325,7 @@ class SquatContext(nn.Module):
         
         augment_obj_feat = torch.split(augment_obj_feat, [len(proposal) for proposal in proposals])
         
-        Decoder_Res = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e)) \
+        Decoder_Res = [self.m2m_decoder(q.unsqueeze(1), (u.unsqueeze(1), p.unsqueeze(1)), (ind, ind_e2e, ind_n2e),consistency_flag) \
                            for p, u, q, ind, ind_e2e, ind_n2e in \
                            zip(feat_pred_batch_key, augment_obj_feat, feat_pred_batch_query, top_inds, top_inds_e2e, top_inds_n2e)]
         
@@ -328,8 +335,9 @@ class SquatContext(nn.Module):
         feat_pred_ = self.exteract_branch_result(top_inds, feat_pred_batch_key, Decoder_Res[0])
         score_obj = self.obj_classifier(feat_obj)
         score_pred = self.rel_classifier(feat_pred_[0])
-        score_e2e = self.e2e_classifier(feat_pred_[1])
-        score_e2n = self.e2n_classifier(feat_pred_[2])
+        if consistency_flag:
+            score_e2e = self.e2e_classifier(feat_pred_[1])
+            score_e2n = self.e2n_classifier(feat_pred_[2])
         return score_obj, score_pred,score_e2e,score_e2n, (masks, masks_e2e, masks_n2e)
 
     def set_pretrain_pre_clser_mode(self, val=True):
@@ -339,6 +347,8 @@ class SquatContext(nn.Module):
         results = []
         for feat_pred_batch in feat_pred_batchs:
             feat_pred_batch_ = []
+            if feat_pred_batch == None:
+                continue
             for idx, (top_ind, k, out) in enumerate(zip(top_inds, feat_pred_batch_key, feat_pred_batch)):
                 remaining_ind = set_diff(torch.arange(k.size(0), device=k.device), top_ind)
                 feat_pred_ = torch.zeros_like(k)

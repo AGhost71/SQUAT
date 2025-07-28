@@ -102,7 +102,7 @@ class ROIRelationHead(torch.nn.Module):
             if self.rel_prop_type == "pre_clser":
                 self.use_same_label_with_clser == cfg.MODEL.ROI_RELATION_HEAD.RELATION_PROPOSAL_MODEL.USE_SAME_LABEL_WITH_CLSER
 
-    def forward(self, features, proposals, targets=None, logger=None):
+    def forward(self, features, proposals, targets=None, logger=None,iteration=0):
         """
         Arguments:
             features (list[Tensor]): feature-maps from possibly several levels
@@ -213,6 +213,7 @@ class ROIRelationHead(torch.nn.Module):
             roi_features,
             union_features,
             logger,
+            iteration = iteration
         )
 
         # proposals, rel_pair_idxs, rel_pn_labels,relness_net_input,roi_features,union_features, None

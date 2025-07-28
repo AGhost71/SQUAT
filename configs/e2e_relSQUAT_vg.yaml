@@ -490,6 +490,8 @@ MODEL:
     VGG16_OUT_CHANNELS: 512
   WEIGHT: catalog://ImageNetPretrained/FAIR/20171220/X-101-32x8d
   CONSISTENCY:
+    START: 30000
+    MARGIN: 0.025
     LANDA: 0.5
 OUTPUT_DIR: checkpoints/sgdet-SedanKeySparsePredictor/(2022-11-09_12)FinalExp3(resampling)
 PATHS_CATALOG: pysgg/config/paths_catalog.py

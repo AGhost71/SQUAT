@@ -367,6 +367,7 @@ def train(
     end = time.time()
     
     trained_params = [n for n, p in model.named_parameters() if p.requires_grad]
+    
     if cfg.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRETRAIN_MASK:
         STOP_ITER = cfg.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRETRAIN_MASK_ITER
         for n, p in model.named_parameters(): 
@@ -374,7 +375,7 @@ def train(
                 p.requires_grad = False
     else:
         STOP_ITER = -1
-
+    start_consistency = cfg.MODEL.CONSISTENCY.START
     model.train()
     max_epoch = 20
     print_first_grad = True
@@ -461,7 +462,13 @@ def train(
             
             if cfg.MODEL.ROI_RELATION_HEAD.SQUAT_MODULE.PRETRAIN_MASK and iteration == STOP_ITER:
                 for n, p in model.named_parameters(): 
-                    if n in trained_params: 
+                    if n in trained_params and 'e2e_classifier' not in n and 'e2n_classifier' not in n: 
+                        p.requires_grad = True
+            
+            if start_consistency==iteration:
+                logger.info("consistent learning started pretraining ended.")
+                for n, p in model.named_parameters(): 
+                    if n in trained_params:
                         p.requires_grad = True
     
             if pre_clser_pretrain_on:
