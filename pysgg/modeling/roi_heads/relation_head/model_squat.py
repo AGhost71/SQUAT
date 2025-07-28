@@ -145,6 +145,9 @@ class P2PDecoderLayer(nn.Module):
         if consistency_flag:
             e2e_updated = self.update_pair(e2e_feature,pair,ind_pair,ind_e2e=ind_e2e)
             e2n_updated = self.update_pair(e2n_feature,pair,ind_pair,sparsified_unary=sparsified_unary)
+        else:
+            e2e_updated = None
+            e2n_updated = None
         updated_pair = self.update_pair(sparsified_pair,pair,ind_pair,ind_e2e=ind_e2e,sparsified_unary=sparsified_unary)
         
         
@@ -338,6 +341,9 @@ class SquatContext(nn.Module):
         if consistency_flag:
             score_e2e = self.e2e_classifier(feat_pred_[1])
             score_e2n = self.e2n_classifier(feat_pred_[2])
+        else:
+            score_e2e = None
+            score_e2n = None
         return score_obj, score_pred,score_e2e,score_e2n, (masks, masks_e2e, masks_n2e)
 
     def set_pretrain_pre_clser_mode(self, val=True):

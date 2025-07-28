@@ -395,7 +395,7 @@ def train(
             images = images.to(device)
             targets = [target.to(device) for target in targets]
     
-            loss_dict = model(images, targets, logger=logger)
+            loss_dict = model(images, targets, logger=logger,iteration=iteration)
     
             losses = sum(loss for loss in loss_dict.values())
     

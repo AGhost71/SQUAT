@@ -107,7 +107,7 @@ class SquatPredictor(nn.Module):
         self.margin = config.MODEL.CONSISTENCY.MARGIN
         self.start_consistency = config.MODEL.CONSISTENCY.START
         self.consistency_loss = MarginMSELoss(self.margin,'mean')
-    def forward(self, inst_proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features,iteration, logger=None): 
+    def forward(self, inst_proposals, rel_pair_idxs, rel_labels, rel_binarys, roi_features, union_features, logger=None,iteration=0): 
         """
         :param inst_proposals:
         :param rel_pair_idxs:
